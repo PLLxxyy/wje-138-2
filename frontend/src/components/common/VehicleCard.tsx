@@ -14,12 +14,12 @@ function getUrgencyLevel(item: UpcomingMaintenanceItem): 'urgent' | 'warning' | 
   const days = item.daysUntil;
   const mileage = item.mileageLeft;
 
-  if (days <= 7 || mileage <= 500) {
-    return 'urgent';
-  }
-  if (days <= 30 || mileage <= 3000) {
-    return 'warning';
-  }
+  const isUrgent = (days !== null && days <= 7) || (mileage !== null && mileage <= 500);
+  if (isUrgent) return 'urgent';
+
+  const isWarning = (days !== null && days <= 30) || (mileage !== null && mileage <= 3000);
+  if (isWarning) return 'warning';
+
   return 'normal';
 }
 
@@ -34,40 +34,72 @@ function getUrgencyColor(level: 'urgent' | 'warning' | 'normal'): string {
   }
 }
 
+function parseDate(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function computeDaysUntil(nextDate: Date | null): number | null {
+  if (!nextDate) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function isDateTrigger(daysUntil: number | null): boolean {
+  return daysUntil !== null && daysUntil <= 30;
+}
+
+function isMileageTrigger(mileageLeft: number | null): boolean {
+  return mileageLeft !== null && mileageLeft <= 3000;
+}
+
 function computeUpcomingItems(
   records: MaintenanceRecord[],
   currentMileage: number
 ): UpcomingMaintenanceItem[] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
   const items: UpcomingMaintenanceItem[] = [];
 
   for (const record of records) {
-    if (!record.nextDate || !record.nextMileage) continue;
+    const parsedDate = parseDate(record.nextDate);
+    const daysUntil = computeDaysUntil(parsedDate);
+    const mileageLeft =
+      record.nextMileage !== null && record.nextMileage !== undefined && currentMileage
+        ? record.nextMileage - currentMileage
+        : null;
 
-    const nextDate = new Date(record.nextDate);
-    if (isNaN(nextDate.getTime())) continue;
+    if (!isDateTrigger(daysUntil) && !isMileageTrigger(mileageLeft)) continue;
 
-    const daysUntil = Math.floor(
-      (nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const mileageLeft = record.nextMileage - currentMileage;
-
-    if (daysUntil <= 30 || mileageLeft <= 3000) {
-      items.push({
-        type: record.type,
-        items: record.items,
-        nextDate: record.nextDate,
-        nextMileage: record.nextMileage,
-        daysUntil,
-        mileageLeft,
-      });
-    }
+    items.push({
+      type: record.type,
+      items: record.items,
+      nextDate: parsedDate ? record.nextDate : null,
+      nextMileage: record.nextMileage ?? null,
+      daysUntil,
+      mileageLeft,
+    });
   }
 
-  items.sort((a, b) => a.daysUntil - b.daysUntil);
+  items.sort((a, b) => {
+    const aDays = a.daysUntil ?? 9999;
+    const bDays = b.daysUntil ?? 9999;
+    return aDays - bDays;
+  });
   return items;
+}
+
+function formatDaysText(daysUntil: number | null): string | null {
+  if (daysUntil === null) return null;
+  if (daysUntil > 0) return `还有 ${daysUntil} 天`;
+  if (daysUntil === 0) return '今天到期';
+  return `已逾期 ${Math.abs(daysUntil)} 天`;
+}
+
+function formatMileageText(mileageLeft: number | null): string | null {
+  if (mileageLeft === null) return null;
+  if (mileageLeft > 0) return `剩余 ${mileageLeft.toLocaleString()} km`;
+  return '已超里程';
 }
 
 export function VehicleCard({
@@ -119,6 +151,9 @@ export function VehicleCard({
 
               {upcomingItems.slice(0, 2).map((item, index) => {
                 const level = getUrgencyLevel(item);
+                const daysText = formatDaysText(item.daysUntil);
+                const mileageText = formatMileageText(item.mileageLeft);
+
                 return (
                   <div key={index} className="text-xs space-y-1">
                     <div className="flex items-center gap-1">
@@ -131,20 +166,17 @@ export function VehicleCard({
                       <span className="text-gray-500">{item.items.join('、')}</span>
                     </div>
                     <div className="flex items-center gap-3 text-gray-500 pl-1">
-                      <span>
-                        {item.daysUntil > 0
-                          ? `还有 ${item.daysUntil} 天`
-                          : item.daysUntil === 0
-                          ? '今天到期'
-                          : `已逾期 ${Math.abs(item.daysUntil)} 天`}
-                      </span>
-                      <span>
-                        剩余 {item.mileageLeft > 0 ? `${item.mileageLeft.toLocaleString()} km` : '已超里程'}
-                      </span>
+                      {daysText && <span>{daysText}</span>}
+                      {mileageText && <span>{mileageText}</span>}
                     </div>
-                    <div className="text-gray-400 pl-1">
-                      下次保养：{item.nextDate}
-                    </div>
+                    {(item.nextDate || item.nextMileage) && (
+                      <div className="text-gray-400 pl-1 flex items-center gap-3">
+                        {item.nextDate && <span>下次保养：{item.nextDate}</span>}
+                        {item.nextMileage !== null && (
+                          <span>保养里程：{item.nextMileage.toLocaleString()} km</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
