@@ -1,8 +1,7 @@
-import { Card, Tag, Spin } from 'antd';
-import { useEffect, useState } from 'react';
-import type { Vehicle, MaintenancePlan, UpcomingMaintenanceItem } from '../../types';
+import { Card, Tag } from 'antd';
+import type { Vehicle, MaintenanceRecord, UpcomingMaintenanceItem } from '../../types';
 import { StatusBadge } from './StatusBadge';
-import { maintenanceApi } from '../../api/maintenance';
+import { useMemo } from 'react';
 
 const MAINTENANCE_TYPE_LABELS: Record<string, string> = {
   Routine: '常规保养',
@@ -15,10 +14,10 @@ function getUrgencyLevel(item: UpcomingMaintenanceItem): 'urgent' | 'warning' | 
   const days = item.daysUntil;
   const mileage = item.mileageLeft;
 
-  if ((days !== null && days <= 7) || (mileage !== null && mileage <= 500)) {
+  if (days <= 7 || mileage <= 500) {
     return 'urgent';
   }
-  if ((days !== null && days <= 30) || (mileage !== null && mileage <= 3000)) {
+  if (days <= 30 || mileage <= 3000) {
     return 'warning';
   }
   return 'normal';
@@ -35,33 +34,63 @@ function getUrgencyColor(level: 'urgent' | 'warning' | 'normal'): string {
   }
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '暂无';
-  return dateStr;
+function computeUpcomingItems(
+  records: MaintenanceRecord[],
+  currentMileage: number
+): UpcomingMaintenanceItem[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const items: UpcomingMaintenanceItem[] = [];
+
+  for (const record of records) {
+    if (!record.nextDate || !record.nextMileage) continue;
+
+    const nextDate = new Date(record.nextDate);
+    if (isNaN(nextDate.getTime())) continue;
+
+    const daysUntil = Math.floor(
+      (nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    const mileageLeft = record.nextMileage - currentMileage;
+
+    if (daysUntil <= 30 || mileageLeft <= 3000) {
+      items.push({
+        type: record.type,
+        items: record.items,
+        nextDate: record.nextDate,
+        nextMileage: record.nextMileage,
+        daysUntil,
+        mileageLeft,
+      });
+    }
+  }
+
+  items.sort((a, b) => a.daysUntil - b.daysUntil);
+  return items;
 }
 
-export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
-  const [plan, setPlan] = useState<MaintenancePlan | null>(null);
-  const [loading, setLoading] = useState(false);
+export function VehicleCard({
+  vehicle,
+  maintenanceRecords,
+}: {
+  vehicle: Vehicle;
+  maintenanceRecords: MaintenanceRecord[];
+}) {
+  const upcomingItems = useMemo(
+    () => computeUpcomingItems(maintenanceRecords, vehicle.mileage),
+    [maintenanceRecords, vehicle.mileage]
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    maintenanceApi.getPlan(vehicle.id)
-      .then(setPlan)
-      .catch(() => setPlan(null))
-      .finally(() => setLoading(false));
-  }, [vehicle.id]);
-
-  const upcomingItems = plan?.upcomingItems ?? [];
   const hasUpcoming = upcomingItems.length > 0;
 
   const mostUrgentLevel = hasUpcoming
-    ? upcomingItems.reduce((prevLevel, item) => {
+    ? upcomingItems.reduce<'urgent' | 'warning' | 'normal'>((prevLevel, item) => {
         const level = getUrgencyLevel(item);
         if (prevLevel === 'urgent' || level === 'urgent') return 'urgent';
         if (prevLevel === 'warning' || level === 'warning') return 'warning';
         return 'normal';
-      }, 'normal' as 'urgent' | 'warning' | 'normal')
+      }, 'normal')
     : null;
 
   return (
@@ -80,11 +109,7 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
         <p className="text-gray-600 text-sm">里程：{vehicle.mileage.toLocaleString()} km</p>
 
         <div className="pt-2 border-t border-gray-100">
-          {loading ? (
-            <div className="flex justify-center py-2">
-              <Spin size="small" />
-            </div>
-          ) : hasUpcoming ? (
+          {hasUpcoming ? (
             <div className="space-y-2">
               <div className="flex items-center gap-1">
                 <Tag color={getUrgencyColor(mostUrgentLevel!)} style={{ margin: 0 }}>
@@ -97,32 +122,29 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
                 return (
                   <div key={index} className="text-xs space-y-1">
                     <div className="flex items-center gap-1">
-                      <Tag color={getUrgencyColor(level)} style={{ margin: 0, padding: '0 6px' }}>
+                      <Tag
+                        color={getUrgencyColor(level)}
+                        style={{ margin: 0, padding: '0 6px' }}
+                      >
                         {MAINTENANCE_TYPE_LABELS[item.type] || item.type}
                       </Tag>
                       <span className="text-gray-500">{item.items.join('、')}</span>
                     </div>
                     <div className="flex items-center gap-3 text-gray-500 pl-1">
-                      {item.daysUntil !== null && (
-                        <span>
-                          {item.daysUntil > 0
-                            ? `还有 ${item.daysUntil} 天`
-                            : item.daysUntil === 0
-                            ? '今天到期'
-                            : `已逾期 ${Math.abs(item.daysUntil)} 天`}
-                        </span>
-                      )}
-                      {item.mileageLeft !== null && (
-                        <span>
-                          剩余 {item.mileageLeft > 0 ? `${item.mileageLeft.toLocaleString()} km` : '已超里程'}
-                        </span>
-                      )}
+                      <span>
+                        {item.daysUntil > 0
+                          ? `还有 ${item.daysUntil} 天`
+                          : item.daysUntil === 0
+                          ? '今天到期'
+                          : `已逾期 ${Math.abs(item.daysUntil)} 天`}
+                      </span>
+                      <span>
+                        剩余 {item.mileageLeft > 0 ? `${item.mileageLeft.toLocaleString()} km` : '已超里程'}
+                      </span>
                     </div>
-                    {item.nextDate && (
-                      <div className="text-gray-400 pl-1">
-                        下次保养：{formatDate(item.nextDate)}
-                      </div>
-                    )}
+                    <div className="text-gray-400 pl-1">
+                      下次保养：{item.nextDate}
+                    </div>
                   </div>
                 );
               })}
@@ -134,9 +156,7 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
               )}
             </div>
           ) : (
-            <div className="text-xs text-gray-400">
-              暂无即将到期的保养
-            </div>
+            <div className="text-xs text-gray-400">暂无即将到期的保养</div>
           )}
         </div>
       </div>

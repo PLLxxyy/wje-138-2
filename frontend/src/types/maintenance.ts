@@ -4,16 +4,8 @@ export type MaintenanceRecord = { id: number; vehicleId: number; type: Maintenan
 export type UpcomingMaintenanceItem = {
   type: MaintenanceType;
   items: string[];
-  nextDate: string | null;
-  nextMileage: number | null;
-  daysUntil: number | null;
-  mileageLeft: number | null;
-};
-
-export type MaintenancePlan = {
-  vehicleId: number;
-  upcomingItems: UpcomingMaintenanceItem[];
-  nearestNextDate: string | null;
-  nearestNextMileage: number | null;
-  currentMileage: number;
+  nextDate: string;
+  nextMileage: number;
+  daysUntil: number;
+  mileageLeft: number;
 };
