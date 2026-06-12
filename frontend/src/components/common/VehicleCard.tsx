@@ -34,7 +34,7 @@ function getUrgencyColor(level: 'urgent' | 'warning' | 'normal'): string {
   }
 }
 
-function parseDate(dateStr: string): Date | null {
+function parseDate(dateStr: string | null | undefined): Date | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   return isNaN(d.getTime()) ? null : d;
@@ -55,6 +55,15 @@ function isMileageTrigger(mileageLeft: number | null): boolean {
   return mileageLeft !== null && mileageLeft <= 3000;
 }
 
+function computeMileageLeft(
+  nextMileage: number | null | undefined,
+  currentMileage: number
+): number | null {
+  if (nextMileage === null || nextMileage === undefined) return null;
+  if (!currentMileage && currentMileage !== 0) return null;
+  return nextMileage - currentMileage;
+}
+
 function computeUpcomingItems(
   records: MaintenanceRecord[],
   currentMileage: number
@@ -62,20 +71,23 @@ function computeUpcomingItems(
   const items: UpcomingMaintenanceItem[] = [];
 
   for (const record of records) {
-    const parsedDate = parseDate(record.nextDate);
+    const rawNextDate = record.nextDate ?? null;
+    const parsedDate = parseDate(rawNextDate);
     const daysUntil = computeDaysUntil(parsedDate);
-    const mileageLeft =
-      record.nextMileage !== null && record.nextMileage !== undefined && currentMileage
-        ? record.nextMileage - currentMileage
-        : null;
+    const rawNextMileage = record.nextMileage;
+    const nextMileageValue: number | null =
+      rawNextMileage === null || rawNextMileage === undefined ? null : rawNextMileage;
+    const mileageLeft = computeMileageLeft(nextMileageValue, currentMileage);
 
     if (!isDateTrigger(daysUntil) && !isMileageTrigger(mileageLeft)) continue;
+
+    const validNextDate: string | null = parsedDate && rawNextDate ? rawNextDate : null;
 
     items.push({
       type: record.type,
       items: record.items,
-      nextDate: parsedDate ? record.nextDate : null,
-      nextMileage: record.nextMileage ?? null,
+      nextDate: validNextDate,
+      nextMileage: nextMileageValue,
       daysUntil,
       mileageLeft,
     });
